@@ -104,6 +104,36 @@ When gas, smoke, or excessive heat is detected, the display immediately locks in
 
 ---
 
+## 🚗 Open Roof Hatch Drive Warning Screen
+
+If any of the 3 roof hatches are open and the vehicle begins driving ($\ge 8$ km/h for $\ge 7$ seconds, verified via GPS Doppler speed and $\ge 4$ satellites), the dashboard immediately takes over with an automotive drive alert and double-chime audible reminder:
+
+```
+╔═══════════════════════════════════════════════════════════════════════════════════════╗
+║ █████████████████████████████████████████████████████████████████████████████████████ ║
+║ ██           ⚠️  DRIVE WARNING: ROOF HATCH OPEN WHILE DRIVING  ⚠️                  ██ ║
+║ ██           SPEED: 18 km/h  •  PULL OVER SAFELY & CLOSE HATCHES                   ██ ║
+║ █████████████████████████████████████████████████████████████████████████████████████ ║
+║                                                                                       ║
+║   ┌─────────────────────────────────────────────────────────────────────────────┐     ║
+║   │   [ ! OPEN ! ]     HATCH 1: BATHROOM AREA       (Front Zone)                │     ║
+║   │   [  CLOSED  ]     HATCH 2: KITCHEN AREA        (Middle Zone)               │     ║
+║   │   [ ! OPEN ! ]     HATCH 3: BED AREA            (Rear Zone)                 │     ║
+║   └─────────────────────────────────────────────────────────────────────────────┘     ║
+║                                                                                       ║
+║            Risk of aerodynamic damage or tearing hatch off at highway speed!          ║
+║                                                                                       ║
+║ █████████████████████████████████████████████████████████████████████████████████████ ║
+║ ██    CHIME ACTIVE  •  DISMISSES AUTOMATICALLY ONCE STOPPED OR HATCHES CLOSED     ██ ║
+║ █████████████████████████████████████████████████████████████████████████████████████ ║
+╚═══════════════════════════════════════════════════════════════════════════════════════╝
+```
+
+* **Zero False Alarms:** Stationary GPS drift (<2–3 km/h) is completely ignored through a 3-stage persistence filter.
+* **Auto-Dismiss:** Once the vehicle stops or the open hatches are latched closed, the chime silences and the screen restores cleanly.
+
+---
+
 ## 📁 Repository Structure
 
 ```

@@ -63,7 +63,10 @@ uart:
 gps:
   id: camper_gps
   uart_id: uart_gps
-  update_interval: 5s
+  update_interval: 1s
+  speed:
+    name: "GPS Speed"
+    id: gps_speed
   latitude:
     name: "GPS Latitude"
     id: gps_latitude
@@ -142,6 +145,28 @@ script:
             - delay: 180ms
             - output.turn_off: buzzer_pwm
             - delay: 350ms
+      - output.turn_off: buzzer_pwm
+
+  # Ненавязчивый автомобильный двойной гонг при открытом люке на ходу
+  - id: drive_hatch_chime
+    mode: restart
+    then:
+      - while:
+          condition:
+            binary_sensor.is_on: hatch_drive_warning
+          then:
+            - output.set_level:
+                id: buzzer_pwm
+                level: 35%
+            - delay: 100ms
+            - output.turn_off: buzzer_pwm
+            - delay: 80ms
+            - output.set_level:
+                id: buzzer_pwm
+                level: 35%
+            - delay: 100ms
+            - output.turn_off: buzzer_pwm
+            - delay: 2500ms
       - output.turn_off: buzzer_pwm
 
 # Цифровые датчики тревоги безопасности
@@ -252,6 +277,52 @@ binary_sensor:
     device_class: window
     lambda: |-
       return false; // При подключении к GPIO 32 заменим на platform: gpio
+
+  # Детекция движения автомобиля с защитой от ложных скачков GPS
+  - platform: template
+    name: "Vehicle Moving"
+    id: vehicle_moving
+    lambda: |-
+      float spd = id(gps_speed).state;
+      float sats = id(gps_satellites).state;
+      if (isnan(spd) || isnan(sats)) return false;
+      // Движение: скорость >= 8.0 км/ч при наличии минимум 4 спутников
+      return (sats >= 4.0 && spd >= 8.0);
+    filters:
+      - delayed_on: 7s   # Непрерывное движение 7 секунд (исключает любые помехи на стоянке)
+      - delayed_off: 5s  # Задержка выключения при остановке
+
+  # Предупреждение: открыт любой люк во время движения
+  - platform: template
+    name: "Hatch Drive Warning"
+    id: hatch_drive_warning
+    lambda: |-
+      bool moving = id(vehicle_moving).state;
+      bool any_hatch_open = (id(hatch_1).state || id(hatch_2).state || id(hatch_3).state);
+      return (moving && any_hatch_open);
+    on_press:
+      - logger.log: "⚠️ WARNING: ROOF HATCH OPEN WHILE VEHICLE IS MOVING!"
+      - script.execute: drive_hatch_chime
+      - lambda: |-
+          struct ClearHelper : public esphome::waveshare_epaper::WaveshareEPaper7P5InV2P {
+            static void reset(esphome::waveshare_epaper::WaveshareEPaper7P5InV2P *d) {
+              static_cast<ClearHelper*>(d)->at_update_ = 0;
+            }
+          };
+          ClearHelper::reset(id(camper_display));
+      - component.update: camper_display
+    on_release:
+      - logger.log: "✅ Roof hatches safe or vehicle stopped."
+      - script.stop: drive_hatch_chime
+      - output.turn_off: buzzer_pwm
+      - lambda: |-
+          struct ClearHelper : public esphome::waveshare_epaper::WaveshareEPaper7P5InV2P {
+            static void reset(esphome::waveshare_epaper::WaveshareEPaper7P5InV2P *d) {
+              static_cast<ClearHelper*>(d)->at_update_ = 0;
+            }
+          };
+          ClearHelper::reset(id(camper_display));
+      - component.update: camper_display
 
 font:
   - file: "gfonts://Roboto"
@@ -456,6 +527,92 @@ display:
         it.print(400, 410, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "ACOUSTIC SIREN ACTIVE  *  AUTO-RECOVERY WHEN SAFE");
         it.print(401, 410, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "ACOUSTIC SIREN ACTIVE  *  AUTO-RECOVERY WHEN SAFE");
         it.print(400, 434, id(font_body), COLOR_OFF, TextAlign::TOP_CENTER, "Continuous monitoring -- dashboard will restore automatically");
+        return; // Полный захват всего экрана!
+      }
+
+      // ========================================================
+      // ⚠️ РЕЖИМ ПРЕДУПРЕЖДЕНИЯ НА ВЕСЬ ЭКРАН: ОТКРЫТ ЛЮК В ДВИЖЕНИИ
+      // ========================================================
+      if (id(hatch_drive_warning).state) {
+        it.fill(COLOR_OFF); // Чистый белый фон
+
+        // Тройная контурная рамка предупреждения
+        it.rectangle(10, 10, 780, 460, COLOR_ON);
+        it.rectangle(12, 12, 776, 456, COLOR_ON);
+        it.rectangle(14, 14, 772, 452, COLOR_ON);
+
+        // Верхний массивный чёрный баннер
+        it.filled_rectangle(18, 18, 764, 95, COLOR_ON);
+        it.print(400, 26, id(font_large), COLOR_OFF, TextAlign::TOP_CENTER, "WARNING: ROOF HATCH OPEN");
+        it.print(401, 26, id(font_large), COLOR_OFF, TextAlign::TOP_CENTER, "WARNING: ROOF HATCH OPEN");
+
+        float spd = id(gps_speed).state;
+        if (isnan(spd) || spd < 0.0) spd = 0.0;
+        char spd_buf[85];
+        snprintf(spd_buf, sizeof(spd_buf), "VEHICLE IN MOTION (%.0f km/h)  *  PULL OVER & CLOSE HATCHES", spd);
+        it.print(400, 76, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, spd_buf);
+        it.print(401, 76, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, spd_buf);
+
+        // Центральный бокс со статусом всех 3 люков
+        it.rectangle(38, 126, 724, 240, COLOR_ON);
+        it.rectangle(40, 128, 720, 236, COLOR_ON);
+
+        it.line(38, 206, 762, 206, COLOR_ON);
+        it.line(38, 286, 762, 286, COLOR_ON);
+
+        // Строка 1: Люк 1 (Bathroom)
+        bool h1 = id(hatch_1).state;
+        it.print(58, 142, id(font_large), COLOR_ON, "HATCH 1: BATHROOM AREA");
+        it.print(59, 142, id(font_large), COLOR_ON, "HATCH 1: BATHROOM AREA");
+        it.print(58, 178, id(font_body), COLOR_ON, "Front Zone Roof Vent");
+        if (h1) {
+          it.rectangle(575, 140, 170, 52, COLOR_ON);
+          it.rectangle(577, 142, 166, 48, COLOR_ON);
+          it.print(660, 150, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "! OPEN !");
+          it.print(661, 150, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "! OPEN !");
+        } else {
+          it.rectangle(575, 140, 170, 52, COLOR_ON);
+          it.print(660, 155, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+        }
+
+        // Строка 2: Люк 2 (Kitchen)
+        bool h2 = id(hatch_2).state;
+        it.print(58, 222, id(font_large), COLOR_ON, "HATCH 2: KITCHEN AREA");
+        it.print(59, 222, id(font_large), COLOR_ON, "HATCH 2: KITCHEN AREA");
+        it.print(58, 258, id(font_body), COLOR_ON, "Middle Zone Roof Vent");
+        if (h2) {
+          it.rectangle(575, 220, 170, 52, COLOR_ON);
+          it.rectangle(577, 222, 166, 48, COLOR_ON);
+          it.print(660, 230, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "! OPEN !");
+          it.print(661, 230, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "! OPEN !");
+        } else {
+          it.rectangle(575, 220, 170, 52, COLOR_ON);
+          it.print(660, 235, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+        }
+
+        // Строка 3: Люк 3 (Bed Area)
+        bool h3 = id(hatch_3).state;
+        it.print(58, 302, id(font_large), COLOR_ON, "HATCH 3: BED AREA");
+        it.print(59, 302, id(font_large), COLOR_ON, "HATCH 3: BED AREA");
+        it.print(58, 338, id(font_body), COLOR_ON, "Rear Bedroom Zone Roof Vent");
+        if (h3) {
+          it.rectangle(575, 300, 170, 52, COLOR_ON);
+          it.rectangle(577, 302, 166, 48, COLOR_ON);
+          it.print(660, 310, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "! OPEN !");
+          it.print(661, 310, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "! OPEN !");
+        } else {
+          it.rectangle(575, 300, 170, 52, COLOR_ON);
+          it.print(660, 315, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+        }
+
+        // Информационный блок снизу
+        it.print(400, 378, id(font_body), COLOR_ON, TextAlign::TOP_CENTER, "High speed air stream will cause mechanical damage to open roof hatches!");
+
+        // Нижний чёрный информационный баннер
+        it.filled_rectangle(18, 402, 764, 58, COLOR_ON);
+        it.print(400, 412, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "AUDIBLE CHIME ACTIVE  *  AUTO-DISMISSES WHEN STOPPED OR CLOSED");
+        it.print(401, 412, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "AUDIBLE CHIME ACTIVE  *  AUTO-DISMISSES WHEN STOPPED OR CLOSED");
+        it.print(400, 436, id(font_body), COLOR_OFF, TextAlign::TOP_CENTER, "Pull over safely and close open hatches to resume navigation dashboard");
         return; // Полный захват всего экрана!
       }
 
