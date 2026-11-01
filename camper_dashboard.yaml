@@ -1,0 +1,781 @@
+esphome:
+  name: camper-monitor
+  friendly_name: "Camper Van Monitor"
+  platformio_options:
+    board_build.partitions: huge_app.csv
+  on_boot:
+    priority: -100
+    then:
+      - delay: 1s
+      # Приветственный тестовый пик (проверка зуммера при включении)
+      - script.execute: beep_start
+      - delay: 4s
+      - component.update: camper_display
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# wifi removed for maximum BLE + E-Paper RAM stability
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source: github://syssi/esphome-jbd-bms@2.4.0
+    refresh: 0s
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+# Две батареи LiFePO4 по 100Ah в параллели (сумма 200Ah)
+ble_client:
+  - id: jbd_client1
+    mac_address: "A5:C2:37:01:16:9B"
+  - id: jbd_client2
+    mac_address: "A5:C2:37:01:17:0E"
+
+jbd_bms_ble:
+  - id: jbd_bms1
+    ble_client_id: jbd_client1
+    update_interval: 5s
+  - id: jbd_bms2
+    ble_client_id: jbd_client2
+    update_interval: 5s
+
+# Шина I2C для гироскопа / креномера MPU-6050
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+  id: bus_a
+
+# Шина UART для GPS-модуля (NEO-6M / NEO-8M)
+uart:
+  - id: uart_gps
+    rx_pin: GPIO16
+    tx_pin: GPIO17
+    baud_rate: 9600
+
+# GPS модуль
+gps:
+  id: camper_gps
+  uart_id: uart_gps
+  update_interval: 5s
+  latitude:
+    name: "GPS Latitude"
+    id: gps_latitude
+  longitude:
+    name: "GPS Longitude"
+    id: gps_longitude
+  altitude:
+    name: "GPS Altitude"
+    id: gps_altitude
+  satellites:
+    name: "GPS Satellites"
+    id: gps_satellites
+
+# Спутниковое время GPS
+time:
+  - platform: gps
+    id: gps_time
+    timezone: "UTC"
+
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO14
+
+# Шина 1-Wire для датчиков температуры DS18B20 (GPIO 18)
+one_wire:
+  - platform: gpio
+    pin: GPIO18
+    id: dallas_bus
+
+# Управление зуммером GERUI (GPIO 23) через аппаратный ШИМ (LEDC)
+# Частота 2500 Гц раскачивает как пассивные (KY-006), так и активные (KY-012) зуммеры
+output:
+  - platform: ledc
+    pin: GPIO23
+    id: buzzer_pwm
+    frequency: 2500Hz
+
+script:
+  # Короткий двойной "бип-бип" при включении платы
+  - id: beep_start
+    mode: single
+    then:
+      - output.set_level:
+          id: buzzer_pwm
+          level: 50%
+      - delay: 80ms
+      - output.turn_off: buzzer_pwm
+      - delay: 60ms
+      - output.set_level:
+          id: buzzer_pwm
+          level: 50%
+      - delay: 100ms
+      - output.turn_off: buzzer_pwm
+
+  # Прерывистая тревожная сирена при обнаружении газа, дыма или пожара
+  - id: alarm_siren
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: |-
+              bool floor_gas = id(gas_alarm).state;
+              bool ceiling_smoke = id(smoke_alarm).state;
+              bool overheat = (!isnan(id(temp_inside).state) && id(temp_inside).state > 55.0);
+              return (floor_gas || ceiling_smoke || overheat);
+          then:
+            - output.set_level:
+                id: buzzer_pwm
+                level: 50%
+            - delay: 180ms
+            - output.turn_off: buzzer_pwm
+            - delay: 80ms
+            - output.set_level:
+                id: buzzer_pwm
+                level: 50%
+            - delay: 180ms
+            - output.turn_off: buzzer_pwm
+            - delay: 350ms
+      - output.turn_off: buzzer_pwm
+
+# Цифровые датчики тревоги безопасности
+binary_sensor:
+  # Датчик 1 (ПОЛ): Утечка газа пропан/бутан (MQ-9 на GPIO 4)
+  - platform: gpio
+    pin:
+      number: GPIO4
+      mode: INPUT_PULLUP
+      inverted: true   # Когда обнаружен газ, DO замыкается на LOW
+    name: "Gas Alarm Floor"
+    id: gas_alarm
+    filters:
+      - delayed_on: 100ms
+      - delayed_off: 500ms
+    on_press:
+      - logger.log: "⚠️ DANGER: GAS / LPG LEAK DETECTED AT FLOOR!"
+      - script.execute: alarm_siren
+      - lambda: |-
+          struct ClearHelper : public esphome::waveshare_epaper::WaveshareEPaper7P5InV2P {
+            static void reset(esphome::waveshare_epaper::WaveshareEPaper7P5InV2P *d) {
+              static_cast<ClearHelper*>(d)->at_update_ = 0;
+            }
+          };
+          ClearHelper::reset(id(camper_display));
+      - component.update: camper_display
+    on_release:
+      - logger.log: "✅ Floor gas level safe."
+      - script.stop: alarm_siren
+      - output.turn_off: buzzer_pwm
+      - lambda: |-
+          struct ClearHelper : public esphome::waveshare_epaper::WaveshareEPaper7P5InV2P {
+            static void reset(esphome::waveshare_epaper::WaveshareEPaper7P5InV2P *d) {
+              static_cast<ClearHelper*>(d)->at_update_ = 0;
+            }
+          };
+          ClearHelper::reset(id(camper_display));
+      - component.update: camper_display
+
+  # Датчик 2 (ПОТОЛОК): Дым / Огонь / CO (MQ на GPIO 33)
+  - platform: gpio
+    pin:
+      number: GPIO33
+      mode: INPUT_PULLUP
+      inverted: true   # Когда обнаружен дым/CO, DO замыкается на LOW
+    name: "Smoke Alarm Ceiling"
+    id: smoke_alarm
+    filters:
+      - delayed_on: 100ms
+      - delayed_off: 500ms
+    on_press:
+      - logger.log: "🚨 DANGER: SMOKE / FIRE DETECTED AT CEILING!"
+      - script.execute: alarm_siren
+      - lambda: |-
+          struct ClearHelper : public esphome::waveshare_epaper::WaveshareEPaper7P5InV2P {
+            static void reset(esphome::waveshare_epaper::WaveshareEPaper7P5InV2P *d) {
+              static_cast<ClearHelper*>(d)->at_update_ = 0;
+            }
+          };
+          ClearHelper::reset(id(camper_display));
+      - component.update: camper_display
+    on_release:
+      - logger.log: "✅ Ceiling smoke level safe."
+      - script.stop: alarm_siren
+      - output.turn_off: buzzer_pwm
+      - lambda: |-
+          struct ClearHelper : public esphome::waveshare_epaper::WaveshareEPaper7P5InV2P {
+            static void reset(esphome::waveshare_epaper::WaveshareEPaper7P5InV2P *d) {
+              static_cast<ClearHelper*>(d)->at_update_ = 0;
+            }
+          };
+          ClearHelper::reset(id(camper_display));
+      - component.update: camper_display
+
+  # Концевик Люка 1 (Геркон MC-38 на GPIO 19 - Санузел / Bathroom)
+  # Один провод геркона -> GND, второй -> GPIO 19
+  - platform: gpio
+    pin:
+      number: GPIO19
+      mode: INPUT_PULLUP
+    name: "Roof Hatch 1 (Bathroom)"
+    id: hatch_1
+    device_class: window
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    on_press:
+      - logger.log: "⚠️ Roof Hatch 1 (Bathroom): OPENED!"
+      - component.update: camper_display
+    on_release:
+      - logger.log: "✅ Roof Hatch 1 (Bathroom): CLOSED."
+      - component.update: camper_display
+
+  # Концевик Люка 2 (Подготовлен для GPIO 5)
+  # Пока провод не подключен, возвращает false (CLOSED), чтобы не было ложного OPEN
+  - platform: template
+    name: "Roof Hatch 2"
+    id: hatch_2
+    device_class: window
+    lambda: |-
+      return false; // При подключении к GPIO 5 заменим на platform: gpio
+
+  # Концевик Люка 3 (Подготовлен для GPIO 32)
+  # Пока провод не подключен, возвращает false (CLOSED)
+  - platform: template
+    name: "Roof Hatch 3"
+    id: hatch_3
+    device_class: window
+    lambda: |-
+      return false; // При подключении к GPIO 32 заменим на platform: gpio
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_huge
+    size: 58
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°•"
+  - file: "gfonts://Roboto"
+    id: font_large
+    size: 36
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°•"
+  - file: "gfonts://Roboto"
+    id: font_sub
+    size: 24
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°•"
+  - file: "gfonts://Roboto"
+    id: font_card_title
+    size: 18
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°•"
+  - file: "gfonts://Roboto"
+    id: font_body
+    size: 15
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°•"
+
+sensor:
+  # БАТАРЕЯ 1 (100Ah)
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms1
+    state_of_charge:
+      name: "Batt 1 SoC"
+      id: b1_soc
+    total_voltage:
+      name: "Batt 1 Voltage"
+      id: b1_voltage
+    current:
+      name: "Batt 1 Current"
+      id: b1_current
+    capacity_remaining:
+      name: "Batt 1 Capacity"
+      id: b1_ah
+
+  # БАТАРЕЯ 2 (100Ah)
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms2
+    state_of_charge:
+      name: "Batt 2 SoC"
+      id: b2_soc
+    total_voltage:
+      name: "Batt 2 Voltage"
+      id: b2_voltage
+    current:
+      name: "Batt 2 Current"
+      id: b2_current
+    capacity_remaining:
+      name: "Batt 2 Capacity"
+      id: b2_ah
+
+  # КРЕНОМЕР MPU-6050
+  - platform: mpu6050
+    i2c_id: bus_a
+    address: 0x68
+    accel_x:
+      id: mpu_accel_x
+    accel_y:
+      id: mpu_accel_y
+    accel_z:
+      id: mpu_accel_z
+    update_interval: 2s
+
+  # Вычисление угла крена (Roll - наклон вправо/влево)
+  - platform: template
+    name: "Tilt Roll"
+    id: tilt_roll
+    unit_of_measurement: "°"
+    accuracy_decimals: 1
+    update_interval: 2s
+    lambda: |-
+      float ax = id(mpu_accel_x).state;
+      float ay = id(mpu_accel_y).state;
+      float az = id(mpu_accel_z).state;
+      if (isnan(ax) || isnan(ay) || isnan(az)) return NAN;
+      return (atan2(ay, az) * 180.0 / 3.14159265);
+
+  # Вычисление угла тангажа (Pitch - наклон вперед/назад)
+  - platform: template
+    name: "Tilt Pitch"
+    id: tilt_pitch
+    unit_of_measurement: "°"
+    accuracy_decimals: 1
+    update_interval: 2s
+    lambda: |-
+      float ax = id(mpu_accel_x).state;
+      float ay = id(mpu_accel_y).state;
+      float az = id(mpu_accel_z).state;
+      if (isnan(ax) || isnan(ay) || isnan(az)) return NAN;
+      return (atan2(ax, sqrt(ay * ay + az * az)) * 180.0 / 3.14159265);
+
+  # Аналоговый уровень датчика газа MQ-9 (Пол, AO на GPIO 35)
+  - platform: adc
+    pin: GPIO35
+    name: "Gas Level Analog Floor"
+    id: gas_analog
+    update_interval: 1s
+    attenuation: auto
+
+  # Аналоговый уровень датчика дыма/CO (Потолок, AO на GPIO 34)
+  - platform: adc
+    pin: GPIO34
+    name: "Smoke Level Analog Ceiling"
+    id: smoke_analog
+    update_interval: 1s
+    attenuation: auto
+
+  # Датчик температуры DS18B20 (Салон / 1-Wire на GPIO 18)
+  - platform: dallas_temp
+    one_wire_id: dallas_bus
+    name: "Temp Inside"
+    id: temp_inside
+    update_interval: 10s
+
+  # Второй датчик температуры (Улица - пока не подключен, выведет --.-°C)
+  - platform: template
+    name: "Temp Outside"
+    id: temp_outside
+    unit_of_measurement: "°C"
+    lambda: |-
+      return NAN;
+
+display:
+  - platform: waveshare_epaper
+    id: camper_display
+    cs_pin: GPIO15
+    dc_pin: GPIO27
+    reset_pin: GPIO26
+    busy_pin:
+      number: GPIO25
+      inverted: true
+    model: 7.50inv2p
+    update_interval: 30s
+    full_update_every: 20
+    reset_duration: 2ms
+    lambda: |-
+      // ========================================================
+      // 🚨 ЭКСТРЕННЫЙ РЕЖИМ НА ВЕСЬ ЭКРАН (800x480): ТРЕВОГА ОПАСНОСТИ
+      // ========================================================
+      bool floor_alarm = id(gas_alarm).state;
+      bool ceiling_alarm = id(smoke_alarm).state;
+      bool fire_temp_alarm = (!isnan(id(temp_inside).state) && id(temp_inside).state > 55.0);
+
+      if (floor_alarm || ceiling_alarm || fire_temp_alarm) {
+        it.fill(COLOR_OFF); // Чистый белый фон
+
+        // Мощная тройная аварийная рамка по всему контуру экрана (800x480)
+        it.rectangle(10, 10, 780, 460, COLOR_ON);
+        it.rectangle(12, 12, 776, 456, COLOR_ON);
+        it.rectangle(14, 14, 772, 452, COLOR_ON);
+        it.rectangle(16, 16, 768, 448, COLOR_ON);
+
+        // Верхний массивный чёрный баннер
+        it.filled_rectangle(18, 18, 764, 95, COLOR_ON);
+        it.print(400, 26, id(font_huge), COLOR_OFF, TextAlign::TOP_CENTER, "!  DANGER  !");
+        it.print(401, 26, id(font_huge), COLOR_OFF, TextAlign::TOP_CENTER, "!  DANGER  !");
+        if (ceiling_alarm) {
+          it.print(400, 82, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "FIRE / SMOKE DETECTED AT CEILING -- EVACUATE!");
+          it.print(401, 82, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "FIRE / SMOKE DETECTED AT CEILING -- EVACUATE!");
+        } else if (floor_alarm) {
+          it.print(400, 82, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "GAS / LPG LEAK DETECTED AT FLOOR -- EVACUATE & VENTILATE!");
+          it.print(401, 82, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "GAS / LPG LEAK DETECTED AT FLOOR -- EVACUATE & VENTILATE!");
+        } else {
+          it.print(400, 82, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "CRITICAL CABIN OVERHEAT (>55C) / FIRE RISK!");
+          it.print(401, 82, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "CRITICAL CABIN OVERHEAT (>55C) / FIRE RISK!");
+        }
+
+        // Подзаголовок
+        it.print(400, 126, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "EMERGENCY SAFETY ACTIONS");
+        it.print(401, 126, id(font_large), COLOR_ON, TextAlign::TOP_CENTER, "EMERGENCY SAFETY ACTIONS");
+
+        it.line(60, 162, 740, 162, COLOR_ON);
+        it.line(60, 164, 740, 164, COLOR_ON);
+
+        // Контурный бокс действий экипажа
+        it.rectangle(35, 175, 730, 215, COLOR_ON);
+        it.rectangle(37, 177, 726, 211, COLOR_ON);
+
+        // 5 чётких шагов (с удвоенной толщиной шрифта для идеальной резкости)
+        it.print(60, 190, id(font_sub), COLOR_ON, "[ 1 ]  OPEN ALL ROOF HATCHES AND CABIN DOORS");
+        it.print(61, 190, id(font_sub), COLOR_ON, "[ 1 ]  OPEN ALL ROOF HATCHES AND CABIN DOORS");
+
+        it.print(60, 230, id(font_sub), COLOR_ON, "[ 2 ]  SHUT OFF GAS CYLINDER VALVE IMMEDIATELY");
+        it.print(61, 230, id(font_sub), COLOR_ON, "[ 2 ]  SHUT OFF GAS CYLINDER VALVE IMMEDIATELY");
+
+        it.print(60, 270, id(font_sub), COLOR_ON, "[ 3 ]  TURN OFF DIESEL / GAS HEATER (NO SPARKS)");
+        it.print(61, 270, id(font_sub), COLOR_ON, "[ 3 ]  TURN OFF DIESEL / GAS HEATER (NO SPARKS)");
+
+        it.print(60, 310, id(font_sub), COLOR_ON, "[ 4 ]  DO NOT USE ANY ELECTRICAL SWITCHES");
+        it.print(61, 310, id(font_sub), COLOR_ON, "[ 4 ]  DO NOT USE ANY ELECTRICAL SWITCHES");
+
+        it.print(60, 350, id(font_sub), COLOR_ON, "[ 5 ]  EVACUATE VEHICLE UNTIL SAFE LEVEL RESTORED");
+        it.print(61, 350, id(font_sub), COLOR_ON, "[ 5 ]  EVACUATE VEHICLE UNTIL SAFE LEVEL RESTORED");
+
+        // Нижний чёрный информационный баннер
+        it.filled_rectangle(18, 400, 764, 58, COLOR_ON);
+        it.print(400, 410, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "ACOUSTIC SIREN ACTIVE  *  AUTO-RECOVERY WHEN SAFE");
+        it.print(401, 410, id(font_card_title), COLOR_OFF, TextAlign::TOP_CENTER, "ACOUSTIC SIREN ACTIVE  *  AUTO-RECOVERY WHEN SAFE");
+        it.print(400, 434, id(font_body), COLOR_OFF, TextAlign::TOP_CENTER, "Continuous monitoring -- dashboard will restore automatically");
+        return; // Полный захват всего экрана!
+      }
+
+      it.fill(COLOR_OFF);
+
+      // ==========================================
+      // СУММИРОВАНИЕ 2 БАТАРЕЙ В ПАРАЛЛЕЛИ (200Ah)
+      // ==========================================
+      float v1 = id(b1_voltage).state;
+      float v2 = id(b2_voltage).state;
+      float c1 = id(b1_current).state;
+      float c2 = id(b2_current).state;
+      float s1 = id(b1_soc).state;
+      float s2 = id(b2_soc).state;
+      float a1 = id(b1_ah).state;
+      float a2 = id(b2_ah).state;
+
+      // Среднее напряжение
+      float volt = NAN;
+      if (!isnan(v1) && !isnan(v2)) volt = (v1 + v2) / 2.0;
+      else if (!isnan(v1)) volt = v1;
+      else if (!isnan(v2)) volt = v2;
+
+      // Суммарный ток (складывается из обеих батарей)
+      float cur = NAN;
+      if (!isnan(c1) && !isnan(c2)) cur = c1 + c2;
+      else if (!isnan(c1)) cur = c1;
+      else if (!isnan(c2)) cur = c2;
+
+      // Суммарная оставшаяся емкость в Ah (до ~200Ah)
+      float ah = NAN;
+      if (!isnan(a1) && !isnan(a2)) ah = a1 + a2;
+      else if (!isnan(a1)) ah = a1;
+      else if (!isnan(a2)) ah = a2;
+
+      // Средний процент заряда
+      float soc = NAN;
+      if (!isnan(s1) && !isnan(s2)) soc = (s1 + s2) / 2.0;
+      else if (!isnan(s1)) soc = s1;
+      else if (!isnan(s2)) soc = s2;
+
+      // ==========================================
+      // КАРТОЧКА 1: ЭНЕРГИЯ И БАТАРЕЯ (ВВЕРХУ СЛЕВА)
+      // ==========================================
+      it.rectangle(15, 15, 485, 220, COLOR_ON);
+      it.line(15, 45, 500, 45, COLOR_ON);
+      it.print(25, 23, id(font_card_title), COLOR_ON, "POWER SYSTEM 12V");
+      it.print(26, 23, id(font_card_title), COLOR_ON, "POWER SYSTEM 12V");
+
+      // Большой процент заряда
+      if (isnan(soc)) {
+        it.print(30, 56, id(font_huge), COLOR_ON, "--%");
+      } else {
+        it.printf(30, 56, id(font_huge), COLOR_ON, "%.0f%%", soc);
+      }
+
+      // Шкала аккумулятора (штриховка вместо сплошной заливки для чистого E-Ink)
+      it.rectangle(175, 64, 290, 38, COLOR_ON);
+      it.rectangle(177, 66, 286, 34, COLOR_ON);
+      it.rectangle(465, 75, 8, 16, COLOR_ON);
+      if (!isnan(soc)) {
+        int fill_w = (int)(278.0 * (soc / 100.0));
+        if (fill_w > 278) fill_w = 278;
+        for (int x = 181; x < 181 + fill_w; x += 4) {
+          it.line(x, 70, x, 96, COLOR_ON);
+          it.line(x + 1, 70, x + 1, 96, COLOR_ON);
+        }
+      }
+
+      it.line(25, 122, 485, 122, COLOR_ON);
+
+      // 3 Колонки метрик питания
+      it.print(30, 132, id(font_body), COLOR_ON, "VOLTAGE");
+      if (isnan(volt)) {
+        it.print(30, 152, id(font_sub), COLOR_ON, "-- V");
+      } else {
+        it.printf(30, 152, id(font_sub), COLOR_ON, "%.2f V", volt);
+      }
+
+      it.line(185, 132, 185, 182, COLOR_ON);
+
+      it.print(200, 132, id(font_body), COLOR_ON, "TOTAL CURRENT");
+      if (isnan(cur)) {
+        it.print(200, 152, id(font_sub), COLOR_ON, "-- A");
+      } else {
+        it.printf(200, 152, id(font_sub), COLOR_ON, "%+.1f A", cur);
+      }
+
+      it.line(345, 132, 345, 182, COLOR_ON);
+
+      it.print(360, 132, id(font_body), COLOR_ON, "NET POWER");
+      if (isnan(volt) || isnan(cur)) {
+        it.print(360, 152, id(font_sub), COLOR_ON, "-- W");
+      } else {
+        it.printf(360, 152, id(font_sub), COLOR_ON, "%+.0f W", volt * cur);
+      }
+
+      it.line(25, 188, 485, 188, COLOR_ON);
+
+      // Статусная строка батареи
+      if (isnan(soc) && isnan(volt)) {
+        it.print(30, 196, id(font_body), COLOR_ON, "BLE: CONNECTING TO 2x JBD BMS...");
+      } else {
+        std::string state_str = "STANDBY";
+        if (!isnan(cur)) {
+          if (cur > 0.3) {
+            state_str = "CHARGING";
+          } else if (cur < -0.3) {
+            state_str = "DISCHARGING";
+          }
+        }
+        
+        char status_buf[95];
+        if (!isnan(a1) && !isnan(a2)) {
+          snprintf(status_buf, sizeof(status_buf), "STATE: %s  •  REMAINING: %.0f Ah  •  B1+B2 OK", state_str.c_str(), ah);
+        } else if (!isnan(ah)) {
+          snprintf(status_buf, sizeof(status_buf), "STATE: %s  •  REMAINING: %.0f Ah  •  1 BATT OK", state_str.c_str(), ah);
+        } else {
+          snprintf(status_buf, sizeof(status_buf), "STATE: %s  •  ONLINE", state_str.c_str());
+        }
+        it.print(30, 196, id(font_body), COLOR_ON, status_buf);
+      }
+
+      // ==========================================
+      // КАРТОЧКА 2: ВРЕМЯ, ДАТА И НАВИГАЦИЯ (ВВЕРХУ СПРАВА)
+      // ==========================================
+      it.rectangle(515, 15, 270, 220, COLOR_ON);
+      it.line(515, 45, 785, 45, COLOR_ON);
+      it.print(525, 23, id(font_card_title), COLOR_ON, "TIME & LOCATION");
+      it.print(526, 23, id(font_card_title), COLOR_ON, "TIME & LOCATION");
+
+      // Часы
+      auto time_now = id(gps_time).now();
+      if (time_now.is_valid()) {
+        it.strftime(650, 52, id(font_huge), COLOR_ON, TextAlign::TOP_CENTER, "%H:%M", time_now);
+        it.strftime(650, 116, id(font_body), COLOR_ON, TextAlign::TOP_CENTER, "%A, %d %b %Y", time_now);
+      } else {
+        it.print(650, 52, id(font_huge), COLOR_ON, TextAlign::TOP_CENTER, "--:--");
+        it.print(650, 116, id(font_body), COLOR_ON, TextAlign::TOP_CENTER, "GPS SEARCHING...");
+      }
+
+      it.line(525, 142, 775, 142, COLOR_ON);
+
+      // Высота
+      it.print(530, 155, id(font_body), COLOR_ON, "ALTITUDE:");
+      float alt = id(gps_altitude).state;
+      if (isnan(alt)) {
+        it.print(770, 152, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "-- m");
+      } else {
+        it.printf(770, 152, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "%.0f m", alt);
+      }
+
+      // Координаты
+      it.print(530, 188, id(font_body), COLOR_ON, "GPS COORD:");
+      float lat = id(gps_latitude).state;
+      float lon = id(gps_longitude).state;
+      if (isnan(lat) || isnan(lon)) {
+        it.print(770, 188, id(font_body), COLOR_ON, TextAlign::TOP_RIGHT, "WAITING FIX");
+      } else {
+        it.printf(770, 188, id(font_body), COLOR_ON, TextAlign::TOP_RIGHT, "%.2fN, %.2fE", lat, lon);
+      }
+
+      // ==========================================
+      // КАРТОЧКА 3: КЛИМАТ И ЛЮКИ (ВНИЗУ СЛЕВА)
+      // ==========================================
+      it.rectangle(15, 245, 485, 220, COLOR_ON);
+      it.line(15, 275, 500, 275, COLOR_ON);
+
+      it.print(25, 253, id(font_card_title), COLOR_ON, "CLIMATE & ROOF HATCHES");
+      it.print(26, 253, id(font_card_title), COLOR_ON, "CLIMATE & ROOF HATCHES");
+
+      // Вертикальный разделитель между климатом и 3 люками
+      it.line(205, 275, 205, 465, COLOR_ON);
+
+      // --- ЛЕВАЯ КОЛОНКА (КЛИМАТ И ГАЗ, x: 15..205) ---
+      // 1. Температура внутри (Салон)
+      it.print(26, 282, id(font_body), COLOR_ON, "INSIDE");
+      if (isnan(id(temp_inside).state)) {
+        it.print(26, 299, id(font_large), COLOR_ON, "--.-°C");
+      } else {
+        it.printf(26, 299, id(font_large), COLOR_ON, "%.1f°C", id(temp_inside).state);
+        it.printf(27, 299, id(font_large), COLOR_ON, "%.1f°C", id(temp_inside).state);
+      }
+
+      it.line(20, 338, 200, 338, COLOR_ON);
+
+      // 2. Температура снаружи (Улица)
+      it.print(26, 345, id(font_body), COLOR_ON, "OUTSIDE");
+      if (isnan(id(temp_outside).state)) {
+        it.print(26, 362, id(font_large), COLOR_ON, "--.-°C");
+      } else {
+        it.printf(26, 362, id(font_large), COLOR_ON, "%.1f°C", id(temp_outside).state);
+        it.printf(27, 362, id(font_large), COLOR_ON, "%.1f°C", id(temp_outside).state);
+      }
+
+      it.line(20, 401, 200, 401, COLOR_ON);
+
+      // 3. Статус безопасности и воздуха (Двухзонный контроль: Пол + Потолок)
+      it.print(26, 409, id(font_body), COLOR_ON, "AIR & SAFETY:");
+      it.print(26, 428, id(font_card_title), COLOR_ON, "NORMAL");
+      it.print(27, 428, id(font_card_title), COLOR_ON, "NORMAL");
+      it.print(26, 448, id(font_body), COLOR_ON, "2 Zones Safe");
+
+      // --- ПРАВАЯ КОЛОНКА (3 ЛЮКА, x: 205..500) ---
+      // Разделители строк люков
+      it.line(205, 338, 500, 338, COLOR_ON);
+      it.line(205, 401, 500, 401, COLOR_ON);
+
+      // Люк 1 (Ванная / Санузел)
+      it.print(222, 286, id(font_card_title), COLOR_ON, "HATCH 1");
+      it.print(223, 286, id(font_card_title), COLOR_ON, "HATCH 1");
+      it.print(222, 312, id(font_body), COLOR_ON, "Bathroom Area");
+      bool h1_open = id(hatch_1).state;
+      if (h1_open) {
+        it.rectangle(378, 288, 106, 36, COLOR_ON);
+        it.rectangle(380, 290, 102, 32, COLOR_ON);
+        it.print(431, 296, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "OPEN");
+        it.print(432, 296, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "OPEN");
+      } else {
+        it.rectangle(378, 288, 106, 36, COLOR_ON);
+        it.print(431, 296, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+        it.print(432, 296, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+      }
+
+      // Люк 2 (Средний / Кухня)
+      it.print(222, 349, id(font_card_title), COLOR_ON, "HATCH 2");
+      it.print(223, 349, id(font_card_title), COLOR_ON, "HATCH 2");
+      it.print(222, 375, id(font_body), COLOR_ON, "Kitchen Area");
+      bool h2_open = id(hatch_2).state;
+      if (h2_open) {
+        it.rectangle(378, 351, 106, 36, COLOR_ON);
+        it.rectangle(380, 353, 102, 32, COLOR_ON);
+        it.print(431, 359, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "OPEN");
+        it.print(432, 359, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "OPEN");
+      } else {
+        it.rectangle(378, 351, 106, 36, COLOR_ON);
+        it.print(431, 359, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+        it.print(432, 359, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+      }
+
+      // Люк 3 (Задний / Спальня)
+      it.print(222, 412, id(font_card_title), COLOR_ON, "HATCH 3");
+      it.print(223, 412, id(font_card_title), COLOR_ON, "HATCH 3");
+      it.print(222, 438, id(font_body), COLOR_ON, "Bed Area");
+      bool h3_open = id(hatch_3).state;
+      if (h3_open) {
+        it.rectangle(378, 414, 106, 36, COLOR_ON);
+        it.rectangle(380, 416, 102, 32, COLOR_ON);
+        it.print(431, 422, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "OPEN");
+        it.print(432, 422, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "OPEN");
+      } else {
+        it.rectangle(378, 414, 106, 36, COLOR_ON);
+        it.print(431, 422, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+        it.print(432, 422, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "CLOSED");
+      }
+
+      // ==========================================
+      // КАРТОЧКА 4: КРЕНОМЕР И ПАРКОВКА (ВНИЗУ СПРАВА)
+      // ==========================================
+      it.rectangle(515, 245, 270, 220, COLOR_ON);
+      it.line(515, 275, 785, 275, COLOR_ON);
+      it.print(525, 253, id(font_card_title), COLOR_ON, "PARKING LEVEL");
+      it.print(526, 253, id(font_card_title), COLOR_ON, "PARKING LEVEL");
+
+      float roll = id(tilt_roll).state;
+      float pitch = id(tilt_pitch).state;
+
+      // Пузырьковый уровень
+      it.rectangle(530, 287, 110, 60, COLOR_ON);
+      it.line(530, 317, 640, 317, COLOR_ON);
+      it.line(585, 287, 585, 347, COLOR_ON);
+
+      int b_x = 585;
+      int b_y = 317;
+      if (!isnan(roll) && !isnan(pitch)) {
+        // Пузырек всплывает в высшую точку (Y-влево -> b_x-=roll; X-вперед -> b_y-=pitch)
+        b_x -= (int)(roll * 6.0);
+        b_y -= (int)(pitch * 6.0);
+        if (b_x < 536) b_x = 536;
+        if (b_x > 634) b_x = 634;
+        if (b_y < 293) b_y = 293;
+        if (b_y > 341) b_y = 341;
+      }
+      it.circle(b_x, b_y, 6, COLOR_ON);
+      it.circle(b_x, b_y, 5, COLOR_ON);
+
+      // Бейдж статуса горизонта (двойная контурная рамка)
+      bool level_ok = (!isnan(roll) && !isnan(pitch) && abs(roll) <= 2.0 && abs(pitch) <= 2.0);
+      it.rectangle(655, 299, 115, 36, COLOR_ON);
+      it.rectangle(657, 301, 111, 32, COLOR_ON);
+      if (level_ok) {
+        it.print(712, 307, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "LEVEL OK");
+        it.print(713, 307, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "LEVEL OK");
+      } else if (!isnan(roll) && !isnan(pitch)) {
+        it.print(712, 307, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "UNEVEN");
+        it.print(713, 307, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "UNEVEN");
+      } else {
+        it.print(712, 307, id(font_card_title), COLOR_ON, TextAlign::TOP_CENTER, "READY");
+      }
+
+      // Разделитель
+      it.line(525, 362, 775, 362, COLOR_ON);
+
+      // Крен (Roll)
+      it.print(530, 377, id(font_body), COLOR_ON, "ROLL (SIDE):");
+      if (isnan(roll)) {
+        it.print(770, 372, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "--°");
+      } else {
+        it.printf(770, 372, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "%+.1f°", roll);
+        it.printf(771, 372, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "%+.1f°", roll);
+      }
+
+      // Разделитель
+      it.line(525, 412, 775, 412, COLOR_ON);
+
+      // Тангаж (Pitch)
+      it.print(530, 427, id(font_body), COLOR_ON, "PITCH (FRONT):");
+      if (isnan(pitch)) {
+        it.print(770, 422, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "--°");
+      } else {
+        it.printf(770, 422, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "%+.1f°", pitch);
+        it.printf(771, 422, id(font_sub), COLOR_ON, TextAlign::TOP_RIGHT, "%+.1f°", pitch);
+      }

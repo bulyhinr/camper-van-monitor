@@ -1,0 +1,12 @@
+# ESPHome compilation files
+.esphome/
+*.bin
+*.elf
+
+# Environment & Secrets
+secrets.yaml
+.env
+
+# OS Files
+.DS_Store
+Thumbs.db
