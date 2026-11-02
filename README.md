@@ -37,6 +37,29 @@ Powered by an **ESP32** and a **7.5" Waveshare Black & White E-Paper display (80
 
 ---
 
+## 📋 Feature Summary & Status
+
+| Category | Feature | Hardware / Protocol | Status |
+| :--- | :--- | :--- | :---: |
+| 🔋 **Power** | Dual LiFePO4 BMS Aggregation (200Ah Total) | 2x JBD Smart BMS (BLE) | ✅ Ready |
+| 🔋 **Power** | Net Current, Voltage, Power & Capacity Remaining | BLE Telemetry calculation | ✅ Ready |
+| 📐 **Leveling** | 2D Spirit Level (Roll & Pitch with 0.1° resolution) | MPU-6050 (I2C) | ✅ Ready |
+| 📐 **Leveling** | Level Status Badge (`[ LEVEL OK ]` / `[ UNEVEN ]`) | $\pm 2.0^\circ$ threshold check | ✅ Ready |
+| 🚨 **Safety** | Floor Combustible Gas Leak Alarm (LPG/Propane) | MQ-9 Sensor (GPIO 4) | ✅ Ready |
+| 🚨 **Safety** | Ceiling Smoke, Fire & Toxic CO Alarm | MQ Sensor (GPIO 33) | ✅ Ready |
+| 🚨 **Safety** | Cabin Thermal Fire Safeguard (>55°C) | DS18B20 1-Wire (GPIO 18) | ✅ Ready |
+| 🚨 **Safety** | Emergency Full-Screen Takeover + 2500Hz Siren | E-Paper Hardware Wipe + PWM | ✅ Ready |
+| 🚗 **Drive Alert**| Open Roof Hatch Warning While Driving | GPS Doppler ($\ge 8$ km/h, 7s) | ✅ Ready |
+| 🚗 **Drive Alert**| Open Hatch Location Identification (3 Zones) | Dynamic Screen + Double Chime | ✅ Ready |
+| 🪟 **Security** | 3x Roof Hatch Monitoring (Bath, Kitchen, Bed) | MC-38 Reed Switches | ✅ Ready |
+| 🌡️ **Climate** | Cabin Indoor & Outdoor Temperatures | Dual DS18B20 (1-Wire) | ✅ Ready |
+| 🧭 **Telemetry**| Speed, Altitude, Satellite Count & Coordinates | u-blox NEO-6M/8M (UART) | ✅ Ready |
+| 🛰️ **Time** | Satellite Atomic Clock Synchronization | GPS NMEA Time | ✅ Ready |
+| 🖥️ **Display** | High-Contrast Sunlight Legible Dashboard | Waveshare 7.5" V2 E-Ink (SPI) | ✅ Ready |
+| 🖥️ **Display** | Zero-Ghosting 10-Min Deep Pigment Full Refresh | Custom ESPHome e-Paper logic | ✅ Ready |
+
+---
+
 ## ✨ Key Features
 
 ### 🔋 1. Dual JBD Smart BMS BLE Aggregation
