@@ -10,7 +10,7 @@ Complete list of components, specifications, sourcing terms, and hardware recomm
 | - | :--- | :--- | :-: | :--- | :--- | :-: |
 | 1 | **E-Paper Display** | Waveshare 7.5" V2 (`7.50inv2p`) | 1 | 800×480 B/W, SPI, Partial refresh support | `Waveshare 7.5 inch e-paper display V2 800x480` | ~$50–$60 |
 | 2 | **ESP32 Driver Board** | Waveshare Universal e-Paper Driver Board | 1 | ESP32-WROOM-32, Onboard FFC connector, USB CP2102 | `Waveshare universal e-paper raw panel driver board ESP32` | ~$12–$15 |
-| 3 | **BMS (Battery)** | JBD / Xiaoxiang Smart BLE BMS | 2 | 4S LiFePO4 100A, Bluetooth 4.0/4.2, UART/BLE | `JBD Smart BMS 4S 100A LiFePO4 Bluetooth` | ~$35–$50 ea |
+| 3 | **BMS (Battery)** | JBD / Xiaoxiang Smart BLE BMS | 1–2+ | 3S/4S/8S LiFePO4 (50A–200A+), Bluetooth BLE | `JBD Smart BMS LiFePO4 Bluetooth` | ~$35–$60 ea |
 | 4 | **Inclinometer / Gyro** | MPU-6050 (GY-521) | 1 | 3-axis Gyro + 3-axis Accel, I2C (`0x68`) | `GY-521 MPU-6050 3 axis accelerometer module` | ~$1.50 |
 | 5 | **GPS Module** | u-blox NEO-6M or NEO-8M | 1 | UART 9600 baud, 3.3V/5V, Ceramic Patch Antenna | `NEO-6M GPS module with ceramic antenna` | ~$4–$8 |
 | 6 | **Temperature Probes** | Dallas DS18B20 (Waterproof) | 2 | 1-Wire, -55°C to +125°C, Stainless steel probe (1m–3m) | `DS18B20 waterproof temperature sensor probe` | ~$2 ea |
@@ -31,8 +31,8 @@ Complete list of components, specifications, sourcing terms, and hardware recomm
 * **Controller:** The **Waveshare Universal e-Paper Driver Board** integrates the ESP32, USB-UART programmer, and the E-Ink power boost circuitry directly onto a single PCB with a dedicated FFC clip connector. Highly recommended over bare ESP32 DevKit to avoid complex manual level-shifting.
 
 ### 2. LiFePO4 BMS (JBD / Xiaoxiang)
-* Supports 1 to 4 battery packs concurrently. In our configuration, **two 100Ah packs** run in parallel for a **total 200Ah capacity**.
-* ESPHome connects via BLE (Bluetooth Low Energy) without wires, polling SoC %, voltage, current, and capacity every 5 seconds.
+* Supports single battery banks or multi-pack parallel setups (1 to 4 packs, 12V / 24V / 48V, any capacity e.g. 100Ah, 200Ah, 300Ah+).
+* ESPHome connects via BLE (Bluetooth Low Energy) without wires, polling SoC %, voltage, current, power, and capacity every 5 seconds.
 
 ### 3. Safety Sensors (MQ-9 and MQ-2)
 * **Pre-heating burn-in:** Brand new MQ sensors require a **24–48 hour burn-in period** (keep powered at 5V) before the semiconductor resistance stabilizes.

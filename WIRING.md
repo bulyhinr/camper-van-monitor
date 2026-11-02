@@ -37,8 +37,8 @@ Complete hardware wiring, pin assignments, schematics, and electrical guidelines
 
 ```
                                   ┌────────────────────────┐
-                                  │ 12V Leisure Battery    │
-                                  │ LiFePO4 (200Ah Total)  │
+                                  │ Leisure Battery Bank   │
+                                  │ LiFePO4 (12V / 24V)    │
                                   └───────────┬────────────┘
                                               │ 12V DC
                                               ▼
@@ -63,7 +63,7 @@ Complete hardware wiring, pin assignments, schematics, and electrical guidelines
   │                           ESP32 CONTROLLER BOARD                          │
   │                     (Waveshare E-Paper Driver Board)                      │
   ├───────────────────────────────────────────────────────────────────────────┤
-  │  [ BLE 4.2 Engine ]  ◄- - - - (Wireless) - - - -►  Dual JBD BMS (2x 100Ah)│
+  │  [ BLE 4.2 Engine ]  ◄- - - - (Wireless) - - - -►  JBD Smart BMS Pack(s)  │
   │                                                                           │
   │  [ SPI Bus: P13, P14, P15, P25, P26, P27 ] ──► Waveshare 7.5" E-Ink       │
   │                                                                           │

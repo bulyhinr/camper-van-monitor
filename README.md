@@ -16,7 +16,7 @@ Powered by an **ESP32** and a **7.5" Waveshare Black & White E-Paper display (80
 
 ```
 ┌─────────────────────────────────────────────────────────────┬─────────────────────────────────────────────────────────┐
-│ ⚡ POWER & BATTERY (200Ah TOTAL)                            │ 🧭 GPS NAVIGATION & TELEMETRY                           │
+│ ⚡ POWER & BATTERY SYSTEM                                   │ 🧭 GPS NAVIGATION & TELEMETRY                           │
 ├───────────────────────────────┬─────────────────────────────┼───────────────────────────────┬─────────────────────────┤
 │ TOTAL SOC                     │ 87W  DISCHARGING            │ SPEED                         │ ALTITUDE: 420m          │
 │                               │ 13.32V  -6.5A               │                               │ SATELLITES: 11          │
@@ -41,7 +41,7 @@ Powered by an **ESP32** and a **7.5" Waveshare Black & White E-Paper display (80
 
 | Category | Feature | Hardware / Protocol | Status |
 | :--- | :--- | :--- | :---: |
-| 🔋 **Power** | Dual LiFePO4 BMS Aggregation (200Ah Total) | 2x JBD Smart BMS (BLE) | ✅ Ready |
+| 🔋 **Power** | Smart LiFePO4 Battery Monitoring (Single or Multi-Pack) | JBD Smart BMS (BLE) | ✅ Ready |
 | 🔋 **Power** | Net Current, Voltage, Power & Capacity Remaining | BLE Telemetry calculation | ✅ Ready |
 | 📐 **Leveling** | 2D Spirit Level (Roll & Pitch with 0.1° resolution) | MPU-6050 (I2C) | ✅ Ready |
 | 📐 **Leveling** | Level Status Badge (`[ LEVEL OK ]` / `[ UNEVEN ]`) | $\pm 2.0^\circ$ threshold check | ✅ Ready |
@@ -51,7 +51,7 @@ Powered by an **ESP32** and a **7.5" Waveshare Black & White E-Paper display (80
 | 🚨 **Safety** | Emergency Full-Screen Takeover + 2500Hz Siren | E-Paper Hardware Wipe + PWM | ✅ Ready |
 | 🚗 **Drive Alert**| Open Roof Hatch Warning While Driving | GPS Doppler ($\ge 8$ km/h, 7s) | ✅ Ready |
 | 🚗 **Drive Alert**| Open Hatch Location Identification (3 Zones) | Dynamic Screen + Double Chime | ✅ Ready |
-| 🪟 **Security** | 3x Roof Hatch Monitoring (Bath, Kitchen, Bed) | MC-38 Reed Switches | ✅ Ready |
+| 🪟 **Security** | 3x Roof Hatch Monitoring (Customizable Zones) | MC-38 Reed Switches | ✅ Ready |
 | 🌡️ **Climate** | Cabin Indoor & Outdoor Temperatures | Dual DS18B20 (1-Wire) | ✅ Ready |
 | 🧭 **Telemetry**| Speed, Altitude, Satellite Count & Coordinates | u-blox NEO-6M/8M (UART) | ✅ Ready |
 | 🛰️ **Time** | Satellite Atomic Clock Synchronization | GPS NMEA Time | ✅ Ready |
@@ -62,10 +62,10 @@ Powered by an **ESP32** and a **7.5" Waveshare Black & White E-Paper display (80
 
 ## ✨ Key Features
 
-### 🔋 1. Dual JBD Smart BMS BLE Aggregation
-* **Wireless BLE Integration:** Wirelessly connects to two 100Ah LiFePO4 battery packs via Bluetooth Low Energy (BLE).
-* **Live Mathematical Aggregation:** Computes aggregate State of Charge (SoC %), net charge/discharge power in Watts, net current in Amps, pack voltage, and total remaining Amp-hours (out of 200Ah).
-* **Charge Direction Detection:** Automatically recognizes whether the system is `CHARGING` (Solar/Alternator/Shore) or `DISCHARGING`.
+### 🔋 1. Smart LiFePO4 Battery Monitoring & Aggregation
+* **Wireless BLE Integration:** Connects wirelessly via Bluetooth Low Energy (BLE) to any JBD / Xiaoxiang Smart BMS. Supports single battery systems or multi-pack parallel setups (12V / 24V / 48V, any capacity such as 100Ah, 200Ah, 300Ah+).
+* **Live Telemetry & Metrics:** Computes aggregate State of Charge (SoC %), net charge/discharge power in Watts, net current in Amps, pack voltage, and total remaining Amp-hours (Ah).
+* **Charge Direction Detection:** Automatically recognizes whether the system is `CHARGING` (Solar/Alternator/Shore), `DISCHARGING`, or in `STANDBY`.
 
 ### 📐 2. Automotive Parking Inclinometer (Spirit Level)
 * **Real-time Vehicle Leveling:** Uses an MPU-6050 6-DOF sensor to compute **Roll** (side-to-side) and **Pitch** (front-to-back) angles with 0.1° resolution.
@@ -180,15 +180,16 @@ pip install esphome
 ```
 
 ### 2. Configure Your Battery BMS Addresses
-Open `camper_dashboard.yaml` and replace the MAC addresses with your JBD BMS Bluetooth addresses:
+Open `camper_dashboard.yaml` and set your JBD BMS Bluetooth MAC address(es):
 ```yaml
 ble_client:
   - id: jbd_client1
-    mac_address: "A5:C2:37:01:16:9B" # <-- Replace with your Battery 1 MAC
-  - id: jbd_client2
-    mac_address: "A5:C2:37:01:17:0E" # <-- Replace with your Battery 2 MAC
+    mac_address: "XX:XX:XX:XX:XX:XX" # <-- Replace with your Battery 1 BMS MAC address
+  # Optional: For dual/multi-battery setups, add your additional packs:
+  # - id: jbd_client2
+  #   mac_address: "YY:YY:YY:YY:YY:YY" # <-- Replace with your Battery 2 BMS MAC address
 ```
-*(Tip: You can find your BMS MAC address using any BLE Scanner app on iOS/Android).*
+*(Tip: You can easily find your BMS MAC address using any BLE Scanner app on iOS/Android).*
 
 ### 3. Flash to ESP32
 Connect your ESP32 board via USB and run:
