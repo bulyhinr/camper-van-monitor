@@ -679,9 +679,9 @@ display:
       // КАРТОЧКА 1: ЭНЕРГИЯ И БАТАРЕЯ (ВВЕРХУ СЛЕВА)
       // ==========================================
       it.rectangle(15, 15, 485, 220, COLOR_ON);
-      it.line(15, 45, 500, 45, COLOR_ON);
-      it.print(25, 23, id(font_card_title), COLOR_ON, "POWER SYSTEM 12V");
-      it.print(26, 23, id(font_card_title), COLOR_ON, "POWER SYSTEM 12V");
+      it.filled_rectangle(15, 15, 485, 30, COLOR_ON);
+      it.print(25, 22, id(font_card_title), COLOR_OFF, "POWER SYSTEM 12V");
+      it.print(26, 22, id(font_card_title), COLOR_OFF, "POWER SYSTEM 12V");
 
       // Большой процент заряда
       if (isnan(soc)) {
@@ -690,16 +690,23 @@ display:
         it.printf(30, 56, id(font_huge), COLOR_ON, "%.0f%%", soc);
       }
 
-      // Шкала аккумулятора (штриховка вместо сплошной заливки для чистого E-Ink)
+      // Шкала аккумулятора (10 крупных монолитных сегментов по 10%)
       it.rectangle(175, 64, 290, 38, COLOR_ON);
       it.rectangle(177, 66, 286, 34, COLOR_ON);
-      it.rectangle(465, 75, 8, 16, COLOR_ON);
+      it.filled_rectangle(465, 75, 8, 16, COLOR_ON);
+      int active_bars = 0;
       if (!isnan(soc)) {
-        int fill_w = (int)(278.0 * (soc / 100.0));
-        if (fill_w > 278) fill_w = 278;
-        for (int x = 181; x < 181 + fill_w; x += 4) {
-          it.line(x, 70, x, 96, COLOR_ON);
-          it.line(x + 1, 70, x + 1, 96, COLOR_ON);
+        active_bars = (int)round(soc / 10.0);
+        if (active_bars < 0) active_bars = 0;
+        if (active_bars > 10) active_bars = 10;
+        if (soc > 2.0 && active_bars == 0) active_bars = 1;
+      }
+      for (int i = 0; i < 10; i++) {
+        int bx = 182 + i * 28;
+        if (i < active_bars) {
+          it.filled_rectangle(bx, 70, 24, 26, COLOR_ON);
+        } else {
+          it.rectangle(bx, 70, 24, 26, COLOR_ON);
         }
       }
 
@@ -761,9 +768,9 @@ display:
       // КАРТОЧКА 2: ВРЕМЯ, ДАТА И НАВИГАЦИЯ (ВВЕРХУ СПРАВА)
       // ==========================================
       it.rectangle(515, 15, 270, 220, COLOR_ON);
-      it.line(515, 45, 785, 45, COLOR_ON);
-      it.print(525, 23, id(font_card_title), COLOR_ON, "TIME & LOCATION");
-      it.print(526, 23, id(font_card_title), COLOR_ON, "TIME & LOCATION");
+      it.filled_rectangle(515, 15, 270, 30, COLOR_ON);
+      it.print(525, 22, id(font_card_title), COLOR_OFF, "TIME & LOCATION");
+      it.print(526, 22, id(font_card_title), COLOR_OFF, "TIME & LOCATION");
 
       // Часы
       auto time_now = id(gps_time).now();
@@ -800,10 +807,10 @@ display:
       // КАРТОЧКА 3: КЛИМАТ И ЛЮКИ (ВНИЗУ СЛЕВА)
       // ==========================================
       it.rectangle(15, 245, 485, 220, COLOR_ON);
-      it.line(15, 275, 500, 275, COLOR_ON);
+      it.filled_rectangle(15, 245, 485, 30, COLOR_ON);
 
-      it.print(25, 253, id(font_card_title), COLOR_ON, "CLIMATE & ROOF HATCHES");
-      it.print(26, 253, id(font_card_title), COLOR_ON, "CLIMATE & ROOF HATCHES");
+      it.print(25, 252, id(font_card_title), COLOR_OFF, "CLIMATE & ROOF HATCHES");
+      it.print(26, 252, id(font_card_title), COLOR_OFF, "CLIMATE & ROOF HATCHES");
 
       // Вертикальный разделитель между климатом и 3 люками
       it.line(205, 275, 205, 465, COLOR_ON);
@@ -894,9 +901,9 @@ display:
       // КАРТОЧКА 4: КРЕНОМЕР И ПАРКОВКА (ВНИЗУ СПРАВА)
       // ==========================================
       it.rectangle(515, 245, 270, 220, COLOR_ON);
-      it.line(515, 275, 785, 275, COLOR_ON);
-      it.print(525, 253, id(font_card_title), COLOR_ON, "PARKING LEVEL");
-      it.print(526, 253, id(font_card_title), COLOR_ON, "PARKING LEVEL");
+      it.filled_rectangle(515, 245, 270, 30, COLOR_ON);
+      it.print(525, 252, id(font_card_title), COLOR_OFF, "PARKING LEVEL");
+      it.print(526, 252, id(font_card_title), COLOR_OFF, "PARKING LEVEL");
 
       float roll = id(tilt_roll).state;
       float pitch = id(tilt_pitch).state;
