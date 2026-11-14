@@ -260,23 +260,43 @@ binary_sensor:
       - logger.log: "✅ Roof Hatch 1 (Bathroom): CLOSED."
       - component.update: camper_display
 
-  # Концевик Люка 2 (Подготовлен для GPIO 5)
-  # Пока провод не подключен, возвращает false (CLOSED), чтобы не было ложного OPEN
-  - platform: template
-    name: "Roof Hatch 2"
+  # Концевик Люка 2 (Геркон MC-38 на GPIO 5 - Кухня / Kitchen)
+  # Один провод геркона -> GND, второй -> GPIO 5
+  - platform: gpio
+    pin:
+      number: GPIO5
+      mode: INPUT_PULLUP
+    name: "Roof Hatch 2 (Kitchen)"
     id: hatch_2
     device_class: window
-    lambda: |-
-      return false; // При подключении к GPIO 5 заменим на platform: gpio
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    on_press:
+      - logger.log: "⚠️ Roof Hatch 2 (Kitchen): OPENED!"
+      - component.update: camper_display
+    on_release:
+      - logger.log: "✅ Roof Hatch 2 (Kitchen): CLOSED."
+      - component.update: camper_display
 
-  # Концевик Люка 3 (Подготовлен для GPIO 32)
-  # Пока провод не подключен, возвращает false (CLOSED)
-  - platform: template
-    name: "Roof Hatch 3"
+  # Концевик Люка 3 (Геркон MC-38 на GPIO 32 - Спальня / Bed Area)
+  # Один провод геркона -> GND, второй -> GPIO 32
+  - platform: gpio
+    pin:
+      number: GPIO32
+      mode: INPUT_PULLUP
+    name: "Roof Hatch 3 (Bed Area)"
     id: hatch_3
     device_class: window
-    lambda: |-
-      return false; // При подключении к GPIO 32 заменим на platform: gpio
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    on_press:
+      - logger.log: "⚠️ Roof Hatch 3 (Bed Area): OPENED!"
+      - component.update: camper_display
+    on_release:
+      - logger.log: "✅ Roof Hatch 3 (Bed Area): CLOSED."
+      - component.update: camper_display
 
   # Детекция движения автомобиля с защитой от ложных скачков GPS
   - platform: template
