@@ -690,23 +690,23 @@ display:
         it.printf(30, 56, id(font_huge), COLOR_ON, "%.0f%%", soc);
       }
 
-      // Шкала аккумулятора (10 крупных монолитных сегментов по 10%)
+      // Шкала аккумулятора (20 аккуратных вертикальных делений по 5%)
       it.rectangle(175, 64, 290, 38, COLOR_ON);
       it.rectangle(177, 66, 286, 34, COLOR_ON);
       it.filled_rectangle(465, 75, 8, 16, COLOR_ON);
       int active_bars = 0;
       if (!isnan(soc)) {
-        active_bars = (int)round(soc / 10.0);
+        active_bars = (int)round(soc / 5.0);
         if (active_bars < 0) active_bars = 0;
-        if (active_bars > 10) active_bars = 10;
-        if (soc > 2.0 && active_bars == 0) active_bars = 1;
+        if (active_bars > 20) active_bars = 20;
+        if (soc > 1.0 && active_bars == 0) active_bars = 1;
       }
-      for (int i = 0; i < 10; i++) {
-        int bx = 182 + i * 28;
+      for (int i = 0; i < 20; i++) {
+        int bx = 182 + i * 14;
         if (i < active_bars) {
-          it.filled_rectangle(bx, 70, 24, 26, COLOR_ON);
+          it.filled_rectangle(bx, 71, 11, 24, COLOR_ON);
         } else {
-          it.rectangle(bx, 70, 24, 26, COLOR_ON);
+          it.rectangle(bx, 71, 11, 24, COLOR_ON);
         }
       }
 
