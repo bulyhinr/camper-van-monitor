@@ -458,17 +458,18 @@ sensor:
   # Датчик температуры DS18B20 (Салон / 1-Wire на GPIO 18)
   - platform: dallas_temp
     one_wire_id: dallas_bus
+    address: 0x78000000d67c3a28
     name: "Temp Inside"
     id: temp_inside
     update_interval: 10s
 
-  # Второй датчик температуры (Улица - пока не подключен, выведет --.-°C)
-  - platform: template
+  # Второй датчик температуры (Улица / 1-Wire на GPIO 18)
+  - platform: dallas_temp
+    one_wire_id: dallas_bus
+    address: 0x28000000d58ca028
     name: "Temp Outside"
     id: temp_outside
-    unit_of_measurement: "°C"
-    lambda: |-
-      return NAN;
+    update_interval: 10s
 
 display:
   - platform: waveshare_epaper
